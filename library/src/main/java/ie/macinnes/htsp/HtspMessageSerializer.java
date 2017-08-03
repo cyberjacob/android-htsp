@@ -1,4 +1,3 @@
-
 /*
  * Copyright (c) 2017 Kiall Mac Innes <kiall@macinnes.ie>
  *
@@ -13,7 +12,8 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */package ie.macinnes.htsp;
+ */
+package ie.macinnes.htsp;
 
 import android.support.annotation.NonNull;
 import android.util.Log;
@@ -21,10 +21,12 @@ import android.util.Log;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Map;
 
 public class HtspMessageSerializer implements HtspMessage.Serializer {
     private static final String TAG = HtspMessageSerializer.class.getSimpleName();
+    private static final boolean DEBUG = false;
 
     private static final byte FIELD_MAP = 1;
     private static final byte FIELD_S64 = 2;
@@ -52,8 +54,9 @@ public class HtspMessageSerializer implements HtspMessage.Serializer {
         int length = (int) bin2long(lenBytes);
         int fullLength = length + 4;
 
-        if (HtspConstants.DEBUG)
+        if (DEBUG) {
             Log.v(TAG, "Reading message of length " + fullLength + " from buffer");
+        }
 
         if (buffer.capacity() < fullLength) {
             throw new RuntimeException("Message exceeds buffer capacity: " + fullLength);
@@ -61,8 +64,9 @@ public class HtspMessageSerializer implements HtspMessage.Serializer {
 
         // Keep reading until we have the entire message
         if (buffer.limit() < fullLength) {
-            if (HtspConstants.DEBUG)
-                Log.d(TAG, "Waiting for more data, don't have enough yet. Need: " + fullLength + " bytes / Have: " + buffer.limit() + " bytes");
+            if (DEBUG) {
+                Log.v(TAG, "Waiting for more data, don't have enough yet. Need: " + fullLength + " bytes / Have: " + buffer.limit() + " bytes");
+            }
             return null;
         }
 
@@ -114,6 +118,15 @@ public class HtspMessageSerializer implements HtspMessage.Serializer {
             buffer.get(valueLengthBytes);
             valueLength = bin2long(valueLengthBytes);
 
+            // 50000000 is ~50MB, aka improbably large. Without this guard, we'll get a series of
+            // OutOfMemoryError crash reports, which don't group nicely as the values are always
+            // different. This makes it hard to understand the extent of the issue or begin tracing
+            // the bug (it may even be a TVHeadend bug?)
+            if (valueLength > 50000000) {
+                Log.e(TAG, "Attempted to deserialize an improbably large field (" + valueLength + " bytes)");
+                throw new RuntimeException("Attempted to deserialize an improbably large field");
+            }
+
             // Deserialize the Key
             if (keyLength == 0) {
                 // Working on a list...
@@ -131,28 +144,33 @@ public class HtspMessageSerializer implements HtspMessage.Serializer {
 
             // Deserialize the Value
             if (fieldType == FIELD_STR) {
-                if (HtspConstants.DEBUG)
+                if (DEBUG) {
                     Log.v(TAG, "Deserializaing a STR with key " + key);
+                }
                 value = new String(valueBytes);
 
             } else if (fieldType == FIELD_S64) {
-                if (HtspConstants.DEBUG)
+                if (DEBUG) {
                     Log.v(TAG, "Deserializaing a S64 with key " + key + " and valueBytes length " + valueBytes.length);
+                }
                 value = toBigInteger(valueBytes);
 
             } else if (fieldType == FIELD_MAP) {
-                if (HtspConstants.DEBUG)
+                if (DEBUG) {
                     Log.v(TAG, "Deserializaing a MAP with key " + key);
+                }
                 value = deserialize(ByteBuffer.wrap(valueBytes));
 
             } else if (fieldType == FIELD_LIST) {
-                if (HtspConstants.DEBUG)
+                if (DEBUG) {
                     Log.v(TAG, "Deserializaing a LIST with key " + key);
+                }
                 value = new ArrayList<>(deserialize(ByteBuffer.wrap(valueBytes)).values());
 
             } else if (fieldType == FIELD_BIN) {
-                if (HtspConstants.DEBUG)
+                if (DEBUG) {
                     Log.v(TAG, "Deserializaing a BIN with key " + key);
+                }
                 value = valueBytes;
 
             } else {
@@ -190,38 +208,45 @@ public class HtspMessageSerializer implements HtspMessage.Serializer {
             // Ignore and do nothing
             return;
         } else if (value instanceof String) {
-            if (HtspConstants.DEBUG)
+            if (DEBUG) {
                 Log.v(TAG, "Serializaing a STR with key " + key + " value " + value);
+            }
             buffer.put(FIELD_STR);
             valueBytes.put(((String) value).getBytes());
         } else if (value instanceof BigInteger) {
-            if (HtspConstants.DEBUG)
+            if (DEBUG) {
                 Log.v(TAG, "Serializaing a S64b with key " + key + " value " + value);
+            }
             buffer.put(FIELD_S64);
             valueBytes.put(toByteArray((BigInteger) value));
         } else if (value instanceof Integer) {
-            if (HtspConstants.DEBUG)
+            if (DEBUG) {
                 Log.v(TAG, "Serializaing a S64i with key " + key + " value " + value);
+            }
             buffer.put(FIELD_S64);
             valueBytes.put(toByteArray(BigInteger.valueOf((Integer) value)));
         } else if (value instanceof Long) {
-            if (HtspConstants.DEBUG)
+            if (DEBUG) {
                 Log.v(TAG, "Serializaing a S64l with key " + key + " value " + value);
+            }
             buffer.put(FIELD_S64);
             valueBytes.put(toByteArray(BigInteger.valueOf((Long) value)));
         } else if (value instanceof Map) {
-            if (HtspConstants.DEBUG)
+            if (DEBUG) {
                 Log.v(TAG, "Serializaing a MAP with key " + key);
+            }
             buffer.put(FIELD_MAP);
             serialize(valueBytes, (Map<String, Object>) value);
         } else if (value instanceof byte[]) {
-            if (HtspConstants.DEBUG)
+            if (DEBUG) {
                 Log.v(TAG, "Serializaing a BIN with key " + key);
+            }
             buffer.put(FIELD_BIN);
             valueBytes.put((byte[]) value);
         } else if (value instanceof Iterable) {
-            if (HtspConstants.DEBUG)
+            if (DEBUG) {
                 Log.v(TAG, "Serializaing a LIST with key " + key);
+            }
             buffer.put(FIELD_LIST);
             serialize(valueBytes, (Iterable<?>) value);
         } else {
@@ -272,11 +297,21 @@ public class HtspMessageSerializer implements HtspMessage.Serializer {
     }
 
     private static byte[] toByteArray(BigInteger big) {
+        // Convert to a byte array
         byte[] b = big.toByteArray();
-        byte b1[] = new byte[b.length];
 
+        // Reverse the byte order
+        byte b1[] = new byte[b.length];
         for (int i = 0; i < b.length; i++) {
             b1[i] = b[b.length - 1 - i];
+        }
+
+        // Negative numbers in HTSP are weird
+        if (big.compareTo(BigInteger.ZERO) < 0) {
+            byte[] b3 = new byte[8];
+            Arrays.fill(b3, (byte) 0xFF);
+            System.arraycopy(b1, 0, b3, 0, b1.length - 1);
+            return b3;
         }
 
         return b1;
@@ -285,10 +320,12 @@ public class HtspMessageSerializer implements HtspMessage.Serializer {
     private static BigInteger toBigInteger(byte b[]) {
         byte b1[] = new byte[b.length + 1];
 
+        // Reverse the order
         for (int i = 0; i < b.length; i++) {
             b1[i + 1] = b[b.length - 1 - i];
         }
 
+        // Convert to a BigInteger
         return new BigInteger(b1);
     }
 }
